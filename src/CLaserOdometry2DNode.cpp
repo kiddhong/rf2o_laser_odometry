@@ -17,79 +17,131 @@
 
 #include "rf2o_laser_odometry/CLaserOdometry2D.h"
 
-#include <tf/transform_broadcaster.h>
-#include <tf/transform_listener.h>
+#include "tf2_ros/buffer.h"
+#include "tf2_ros/transform_broadcaster.h"
+#include "tf2_ros/transform_listener.h"
 
-namespace rf2o {
+#include <tf2/utils.h>
+#include <tf2/LinearMath/Matrix3x3.h>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Transform.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 
-class CLaserOdometry2DNode : CLaserOdometry2D
+using namespace std::chrono_literals;
+
+// namespace rf2o {
+
+class CLaserOdometry2DNode : public rclcpp::Node
 {
 public:
 
   CLaserOdometry2DNode();
   ~CLaserOdometry2DNode() = default;
 
-  void process(const ros::TimerEvent &);
+  void process();
   void publish();
 
   bool setLaserPoseFromTf();
 
 public:
+  using Scalar = float;
 
-  bool publish_tf, new_scan_available;
+  using Pose2d = Eigen::Isometry2d;
+  using Pose3d = Eigen::Isometry3d;
+  using MatrixS31 = Eigen::Matrix<Scalar, 3, 1>;
+  using IncrementCov = Eigen::Matrix<Scalar, 3, 3>;
+
+  CLaserOdometry2D* rf2o_;
+
+  bool publish_tf = true;
+  bool new_scan_available;
 
   double freq;
 
-  std::string         laser_scan_topic;
-  std::string         odom_topic;
-  std::string         base_frame_id;
-  std::string         odom_frame_id;
-  std::string         init_pose_from_topic;
+  std::string         laser_scan_topic = "scan";
+  std::string         odom_topic = "odom_poes";
+  std::string         base_frame_id = "base_link";
+  std::string         odom_frame_id = "odom";
+  std::string         init_pose_from_topic = "odom_init_pose";
 
-  ros::NodeHandle             n;
-  sensor_msgs::LaserScan      last_scan;
-  bool                        GT_pose_initialized;
-  tf::TransformListener       tf_listener;          //Do not put inside the callback
-  tf::TransformBroadcaster    odom_broadcaster;
-  nav_msgs::Odometry          initial_robot_pose;
+  bool verbose_param;
+  
+  sensor_msgs::msg::LaserScan      last_scan;
+  bool                             GT_pose_initialized;
+
+  // Transforms
+  std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+  
+  std::shared_ptr<tf2_ros::TransformBroadcaster>    odom_broadcaster_;
+  nav_msgs::msg::Odometry          initial_robot_pose;
+  
 
   //Subscriptions & Publishers
-  ros::Subscriber laser_sub, initPose_sub;
-  ros::Publisher odom_pub;
+  rclcpp::Subscription<sensor_msgs::msg::LaserScan>::ConstSharedPtr laser_sub;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::ConstSharedPtr initPose_sub;
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub;
+
+  rclcpp::TimerBase::SharedPtr process_timer_;
 
   bool scan_available();
 
   //CallBacks
-  void LaserCallBack(const sensor_msgs::LaserScan::ConstPtr& new_scan);
-  void initPoseCallBack(const nav_msgs::Odometry::ConstPtr& new_initPose);
+  void LaserCallBack(const sensor_msgs::msg::LaserScan::SharedPtr new_scan);
+  void initPoseCallBack(const nav_msgs::msg::Odometry::SharedPtr new_initPose);
+
+  void DeclareParam();
+  void GetParam();
 };
 
-CLaserOdometry2DNode::CLaserOdometry2DNode() :
-  CLaserOdometry2D()
+void CLaserOdometry2DNode::DeclareParam(void)
 {
-  ROS_INFO("Initializing RF2O node...");
+    declare_parameter("laser_scan_topic", laser_scan_topic);
+    declare_parameter("odom_topic", odom_topic);
+    declare_parameter("base_frame_id", base_frame_id);
+    declare_parameter("odom_frame_id", odom_frame_id);
+    declare_parameter("init_pose_from_topic", init_pose_from_topic);
+    declare_parameter("publish_tf", publish_tf);
+    declare_parameter("verbose", verbose_param);
+}
+
+void CLaserOdometry2DNode::GetParam(void)
+{
+    laser_scan_topic = get_parameter("laser_scan_topic").as_string();
+    odom_topic = get_parameter("odom_topic").as_string();
+    base_frame_id = get_parameter("base_frame_id").as_string();
+    odom_frame_id = get_parameter("odom_frame_id").as_string();
+    init_pose_from_topic = get_parameter("init_pose_from_topic").as_string();
+    publish_tf = get_parameter("publish_tf").as_bool();
+    verbose_param = get_parameter("verbose").as_bool();
+}
+
+CLaserOdometry2DNode::CLaserOdometry2DNode() : Node("rf2o_laser_odometry")
+{
+  RCLCPP_INFO(get_logger(), "Localization Configuring...");
 
   //Read Parameters
   //----------------
-  ros::NodeHandle pn("~");
-  pn.param<std::string>("laser_scan_topic",laser_scan_topic,"/laser_scan");
-  pn.param<std::string>("odom_topic", odom_topic, "/odom_rf2o");
-  pn.param<std::string>("base_frame_id", base_frame_id, "/base_link");
-  pn.param<std::string>("odom_frame_id", odom_frame_id, "/odom");
-  pn.param<bool>("publish_tf", publish_tf, true);
-  pn.param<std::string>("init_pose_from_topic", init_pose_from_topic, "/base_pose_ground_truth");
-  pn.param<double>("freq",freq,10.0);
-  pn.param<bool>("verbose", verbose, true);
+  DeclareParam();
+  GetParam();
 
   //Publishers and Subscribers
   //--------------------------
-  odom_pub  = pn.advertise<nav_msgs::Odometry>(odom_topic, 5);
-  laser_sub = n.subscribe<sensor_msgs::LaserScan>(laser_scan_topic,1,&CLaserOdometry2DNode::LaserCallBack,this);
+  odom_pub  = create_publisher<nav_msgs::msg::Odometry>(odom_topic, 5);
 
-  //init pose??
+  laser_sub = create_subscription<sensor_msgs::msg::LaserScan>(
+      laser_scan_topic, 1, std::bind(&CLaserOdometry2DNode::LaserCallBack, this, std::placeholders::_1));
+
+  tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
+	tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+  odom_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
+
   if (init_pose_from_topic != "")
   {
-    initPose_sub = n.subscribe<nav_msgs::Odometry>(init_pose_from_topic,1,&CLaserOdometry2DNode::initPoseCallBack,this);
+    initPose_sub = create_subscription<nav_msgs::msg::Odometry>(
+      init_pose_from_topic, 1, std::bind(&CLaserOdometry2DNode::initPoseCallBack, this, std::placeholders::_1));
+
     GT_pose_initialized  = false;
   }
   else
@@ -103,14 +155,18 @@ CLaserOdometry2DNode::CLaserOdometry2DNode() :
     initial_robot_pose.pose.pose.orientation.y = 0;
     initial_robot_pose.pose.pose.orientation.z = 0;
   }
-
   setLaserPoseFromTf();
-
+  
+  rf2o_ = new CLaserOdometry2D();
+  
   //Init variables
-  module_initialized = false;
-  first_laser_scan   = true;
+  rf2o_->verbose = verbose_param;
+  rf2o_->module_initialized = false;
+  rf2o_->first_laser_scan = true;
+  
+  process_timer_ = this->create_wall_timer(
+    100ms, std::bind(&CLaserOdometry2DNode::process, this)); // 10Hz
 
-  ROS_INFO_STREAM("Listening laser scan from topic: " << laser_sub.getTopic());
 }
 
 bool CLaserOdometry2DNode::setLaserPoseFromTf()
@@ -119,23 +175,32 @@ bool CLaserOdometry2DNode::setLaserPoseFromTf()
 
   // Set laser pose on the robot (through tF)
   // This allow estimation of the odometry with respect to the robot base reference system.
-  tf::StampedTransform transform;
-  transform.setIdentity();
+  
+  rclcpp::Duration timeout{1, 0};
+  geometry_msgs::msg::TransformStamped transformStamped;
   try
   {
-    tf_listener.lookupTransform(base_frame_id, last_scan.header.frame_id, ros::Time(0), transform);
+    rclcpp::Time rclcpp_time = now();
+		tf2::TimePoint tf2_time(std::chrono::nanoseconds(rclcpp_time.nanoseconds()));
+    transformStamped = tf_buffer_->lookupTransform(base_frame_id, last_scan.header.frame_id, tf2_time);
     retrieved = true;
   }
-  catch (tf::TransformException &ex)
+  catch (tf2::TransformException &ex)
   {
-    ROS_ERROR("%s",ex.what());
-    ros::Duration(1.0).sleep();
+    RCLCPP_ERROR(get_logger(), "%s",ex.what());
     retrieved = false;
   }
 
   //TF:transform -> Eigen::Isometry3d
+  // geometry_msgs::msg::PoseStamped msg = transformStamped.transform.rotation;
+  tf2::Quaternion laser_tf_q; 
+  tf2::fromMsg(transformStamped.transform.rotation, laser_tf_q);
+  // laser_tf_q.w = transformStamped.transform.rotation.w;
+  // laser_tf_q.x = transformStamped.transform.rotation.x;
+  // laser_tf_q.y = transformStamped.transform.rotation.y;
+  // laser_tf_q.z = transformStamped.transform.rotation.z;
 
-  const tf::Matrix3x3 &basis = transform.getBasis();
+  const tf2::Matrix3x3 basis(laser_tf_q);
   Eigen::Matrix3d R;
 
   for(int r = 0; r < 3; r++)
@@ -144,12 +209,11 @@ bool CLaserOdometry2DNode::setLaserPoseFromTf()
 
   Pose3d laser_tf(R);
 
-  const tf::Vector3 &t = transform.getOrigin();
-  laser_tf.translation()(0) = t[0];
-  laser_tf.translation()(1) = t[1];
-  laser_tf.translation()(2) = t[2];
+  laser_tf.translation()(0) = transformStamped.transform.translation.x;
+  laser_tf.translation()(1) = transformStamped.transform.translation.y;
+  laser_tf.translation()(2) = transformStamped.transform.translation.z;
 
-  setLaserPose(laser_tf);
+  rf2o_->setLaserPose(laser_tf);
 
   return retrieved;
 }
@@ -159,18 +223,18 @@ bool CLaserOdometry2DNode::scan_available()
   return new_scan_available;
 }
 
-void CLaserOdometry2DNode::process(const ros::TimerEvent&)
+void CLaserOdometry2DNode::process()
 {
-  if( is_initialized() && scan_available() )
+  if( rf2o_->is_initialized() && scan_available() )
   {
     //Process odometry estimation
-    odometryCalculation(last_scan);
+    rf2o_->odometryCalculation(last_scan);
     publish();
     new_scan_available = false; //avoids the possibility to run twice on the same laser scan
   }
   else
   {
-    ROS_WARN("Waiting for laser_scans....") ;
+    RCLCPP_INFO(get_logger(), "Waiting for laser_scans....") ;
   }
 }
 
@@ -178,31 +242,31 @@ void CLaserOdometry2DNode::process(const ros::TimerEvent&)
 //                                   CALLBACKS
 //-----------------------------------------------------------------------------------
 
-void CLaserOdometry2DNode::LaserCallBack(const sensor_msgs::LaserScan::ConstPtr& new_scan)
+void CLaserOdometry2DNode::LaserCallBack(const sensor_msgs::msg::LaserScan::SharedPtr new_scan)
 {
   if (GT_pose_initialized)
   {
     //Keep in memory the last received laser_scan
     last_scan = *new_scan;
-    current_scan_time = last_scan.header.stamp;
+    rf2o_->current_scan_time = last_scan.header.stamp;
 
     //Initialize module on first scan
-    if (!first_laser_scan)
+    if (!rf2o_->first_laser_scan)
     {
       //copy laser scan to internal variable
-      for (unsigned int i = 0; i<width; i++)
-        range_wf(i) = new_scan->ranges[i];
+      for (unsigned int i = 0; i<rf2o_->width; i++)
+        rf2o_->range_wf(i) = new_scan->ranges[i];
       new_scan_available = true;
     }
     else
     {
-      init(last_scan, initial_robot_pose.pose.pose);
-      first_laser_scan = false;
+      rf2o_->init(last_scan, initial_robot_pose.pose.pose);
+      rf2o_->first_laser_scan = false;
     }
   }
 }
 
-void CLaserOdometry2DNode::initPoseCallBack(const nav_msgs::Odometry::ConstPtr& new_initPose)
+void CLaserOdometry2DNode::initPoseCallBack(const nav_msgs::msg::Odometry::SharedPtr new_initPose)
 {
   //Initialize module on first GT pose. Else do Nothing!
   if (!GT_pose_initialized)
@@ -218,62 +282,60 @@ void CLaserOdometry2DNode::publish()
   //---------------------------------------
   if (publish_tf)
   {
-    //ROS_INFO("[rf2o] Publishing TF: [base_link] to [odom]");
-    geometry_msgs::TransformStamped odom_trans;
-    odom_trans.header.stamp = ros::Time::now();
+    //RCLCPP_INFO(get_logger(), "[rf2o] Publishing TF: [base_link] to [odom]");
+    geometry_msgs::msg::TransformStamped odom_trans;
+    odom_trans.header.stamp = rclcpp::Clock().now();
     odom_trans.header.frame_id = odom_frame_id;
     odom_trans.child_frame_id = base_frame_id;
-    odom_trans.transform.translation.x = robot_pose_.translation()(0);
-    odom_trans.transform.translation.y = robot_pose_.translation()(1);
+    odom_trans.transform.translation.x = rf2o_->robot_pose_.translation()(0);
+    odom_trans.transform.translation.y = rf2o_->robot_pose_.translation()(1);
     odom_trans.transform.translation.z = 0.0;
-    odom_trans.transform.rotation = tf::createQuaternionMsgFromYaw(rf2o::getYaw(robot_pose_.rotation()));
+    double odom_yaw = getYaw(rf2o_->robot_pose_.rotation());
+    tf2::Quaternion odom_q;
+    odom_q.setRPY(0, 0, odom_yaw);
+    odom_trans.transform.rotation = tf2::toMsg(odom_q);
+
     //send the transform
-    odom_broadcaster.sendTransform(odom_trans);
+    odom_broadcaster_->sendTransform(odom_trans);
   }
 
   //next, we'll publish the odometry message over ROS
   //-------------------------------------------------
-  //ROS_INFO("[rf2o] Publishing Odom Topic");
-  nav_msgs::Odometry odom;
-  odom.header.stamp = ros::Time::now();
+  //RCLCPP_INFO(get_logger(), "[rf2o] Publishing Odom Topic");
+  nav_msgs::msg::Odometry odom;
+  odom.header.stamp = rclcpp::Clock().now();
   odom.header.frame_id = odom_frame_id;
+
   //set the position
-  odom.pose.pose.position.x = robot_pose_.translation()(0);
-  odom.pose.pose.position.y = robot_pose_.translation()(1);
+  odom.pose.pose.position.x = rf2o_->robot_pose_.translation()(0);
+  odom.pose.pose.position.y = rf2o_->robot_pose_.translation()(1);
   odom.pose.pose.position.z = 0.0;
-  odom.pose.pose.orientation = tf::createQuaternionMsgFromYaw(rf2o::getYaw(robot_pose_.rotation()));
+
+  double odom_yaw_pub = getYaw(rf2o_->robot_pose_.rotation());
+  tf2::Quaternion odom_q_pub;
+  odom_q_pub.setRPY(0, 0, odom_yaw_pub);
+  odom.pose.pose.orientation = tf2::toMsg(odom_q_pub);
+  
   //set the velocity
   odom.child_frame_id = base_frame_id;
-  odom.twist.twist.linear.x = lin_speed;    //linear speed
+  odom.twist.twist.linear.x = rf2o_->lin_speed;    //linear speed
   odom.twist.twist.linear.y = 0.0;
-  odom.twist.twist.angular.z = ang_speed;   //angular speed
+  odom.twist.twist.angular.z = rf2o_->ang_speed;   //angular speed
   //publish the message
-  odom_pub.publish(odom);
+  odom_pub->publish(odom);
 }
 
-} /* namespace rf2o */
+// } /* namespace rf2o */
 
 //-----------------------------------------------------------------------------------
 //                                   MAIN
 //-----------------------------------------------------------------------------------
-int main(int argc, char** argv)
+int main(int argc, char* argv[])
 {
-  ros::init(argc, argv, "RF2O_LaserOdom");
 
-  rf2o::CLaserOdometry2DNode myLaserOdomNode;
-
-  ros::TimerOptions timer_opt;
-  timer_opt.oneshot   = false;
-  timer_opt.autostart = true;
-  timer_opt.callback_queue = ros::getGlobalCallbackQueue();
-  timer_opt.tracked_object = ros::VoidConstPtr();
-
-  timer_opt.callback = boost::bind(&rf2o::CLaserOdometry2DNode::process, &myLaserOdomNode, _1);
-  timer_opt.period   = ros::Rate(myLaserOdomNode.freq).expectedCycleTime();
-
-  ros::Timer rf2o_timer = ros::NodeHandle("~").createTimer(timer_opt);
-
-  ros::spin();
-
-  return EXIT_SUCCESS;
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared<CLaserOdometry2DNode>());
+  rclcpp::shutdown();
+   
+  return 0;
 }

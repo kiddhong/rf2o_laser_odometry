@@ -17,26 +17,27 @@
 
 #include "rf2o_laser_odometry/CLaserOdometry2D.h"
 
-namespace rf2o {
+// namespace rf2o {
 
 // --------------------------------------------
 // CLaserOdometry2D
 //---------------------------------------------
 
-CLaserOdometry2D::CLaserOdometry2D() :
-  verbose(false),
-  module_initialized(false),
-  first_laser_scan(true),
-  last_increment_(Pose3d::Identity()),
-  laser_pose_on_robot_(Pose3d::Identity()),
-  laser_pose_on_robot_inv_(Pose3d::Identity()),
-  laser_pose_(Pose3d::Identity()),
-  laser_oldpose_(Pose3d::Identity()),
-  robot_pose_(Pose3d::Identity()),
-  robot_oldpose_(Pose3d::Identity())
-{
-  //
-}
+// CLaserOdometry2D() :
+//   verbose(false),
+//   module_initialized(false),
+//   first_laser_scan(true),
+//   last_increment_(Pose3d::Identity()),
+//   laser_pose_on_robot_(Pose3d::Identity()),
+//   laser_pose_on_robot_inv_(Pose3d::Identity()),
+//   laser_pose_(Pose3d::Identity()),
+//   laser_oldpose_(Pose3d::Identity()),
+//   robot_pose_(Pose3d::Identity()),
+//   robot_oldpose_(Pose3d::Identity())
+// {
+//   //
+// }
+
 
 void CLaserOdometry2D::setLaserPose(const Pose3d& laser_pose)
 {
@@ -51,11 +52,10 @@ bool CLaserOdometry2D::is_initialized()
   return module_initialized;
 }
 
-void CLaserOdometry2D::init(const sensor_msgs::LaserScan& scan,
-                            const geometry_msgs::Pose& initial_robot_pose)
+void CLaserOdometry2D::init(const sensor_msgs::msg::LaserScan& scan, const geometry_msgs::msg::Pose& initial_robot_pose)
 {
   //Got an initial scan laser, obtain its parametes
-  ROS_INFO_COND(verbose, "[rf2o] Got first Laser Scan .... Configuring node");
+  if (verbose) std::cout<< "[rf2o] Got first Laser Scan .... Configuring node" <<std::endl;
 
   width = scan.ranges.size();    // Num of samples (size) of the scan laser
 
@@ -74,8 +74,8 @@ void CLaserOdometry2D::init(const sensor_msgs::LaserScan& scan,
   robot_initial_pose.translation()(0) = initial_robot_pose.position.x;
   robot_initial_pose.translation()(1) = initial_robot_pose.position.y;
 
-  ROS_INFO_STREAM_COND(verbose, "[rf2o] Setting origin at:\n"
-                       << robot_initial_pose.matrix());
+  if (verbose) std::cout << "[rf2o] Setting origin at:"<<std::endl
+                       << robot_initial_pose.matrix() << std::endl;
 
   //Set the initial pose
   laser_pose_    = robot_initial_pose * laser_pose_on_robot_;
@@ -156,7 +156,7 @@ void CLaserOdometry2D::init(const sensor_msgs::LaserScan& scan,
   kai_loc_old_ = MatrixS31::Zero();
 
   module_initialized = true;
-  last_odom_time = ros::Time::now();
+  last_odom_time = rclcpp::Clock().now();
 }
 
 const CLaserOdometry2D::Pose3d& CLaserOdometry2D::getIncrement() const
@@ -179,7 +179,7 @@ const CLaserOdometry2D::Pose3d& CLaserOdometry2D::getPose() const
   return robot_pose_;
 }
 
-bool CLaserOdometry2D::odometryCalculation(const sensor_msgs::LaserScan& scan)
+bool CLaserOdometry2D::odometryCalculation(const sensor_msgs::msg::LaserScan& scan)
 {
   //==================================================================================
   //						DIFERENTIAL  ODOMETRY  MULTILEVEL
@@ -188,7 +188,7 @@ bool CLaserOdometry2D::odometryCalculation(const sensor_msgs::LaserScan& scan)
   //copy laser scan to internal variable
   range_wf = Eigen::Map<const Eigen::MatrixXf>(scan.ranges.data(), width, 1);
 
-  ros::WallTime start = ros::WallTime::now();
+  rclcpp::Time start = rclcpp::Clock().now();
 
   createImagePyramid();
 
@@ -249,10 +249,10 @@ bool CLaserOdometry2D::odometryCalculation(const sensor_msgs::LaserScan& scan)
     if (!filterLevelSolution()) return false;
   }
 
-  m_runtime = ros::WallTime::now() - start;
+  m_runtime = rclcpp::Clock().now() - start;
 
-  ROS_INFO_COND(verbose, "[rf2o] execution time (ms): %f",
-                m_runtime.toSec()*double(1000));
+  if (verbose) 
+  printf("[rf2o] execution time (ms): %f", m_runtime.nanoseconds()*1e-6);
 
   //Update poses
   PoseUpdate();
@@ -716,7 +716,7 @@ void CLaserOdometry2D::solveSystemNonLinear()
   cov_odo = (1.f/float(num_valid_range-3))*AtA.inverse()*res.squaredNorm();
   kai_loc_level_ = Var;
 
-  ROS_INFO_STREAM_COND(verbose && false, "[rf2o] COV_ODO:\n" << cov_odo);
+  if (verbose && false) std::cout << "[rf2o] COV_ODO: " << cov_odo << std::endl;
 }
 
 void CLaserOdometry2D::Reset(const Pose3d& ini_pose/*, CObservation2DRangeScan scan*/)
@@ -811,7 +811,7 @@ bool CLaserOdometry2D::filterLevelSolution()
   Eigen::SelfAdjointEigenSolver<Eigen::MatrixXf> eigensolver(cov_odo);
   if (eigensolver.info() != Eigen::Success)
   {
-    ROS_WARN_COND(verbose, "[rf2o] ERROR: Eigensolver couldn't find a solution. Pose is not updated");
+    if (verbose) std::cout << "[rf2o] ERROR: Eigensolver couldn't find a solution. Pose is not updated" << std::endl;
     return false;
   }
 
@@ -841,7 +841,7 @@ bool CLaserOdometry2D::filterLevelSolution()
     kai_loc_sub(2) = 0.f;
   else
   {
-    kai_loc_sub(2) = -fps*std::acos(acu_trans(0,0))*rf2o::sign(acu_trans(1,0));
+    kai_loc_sub(2) = -fps*std::acos(acu_trans(0,0))*sign(acu_trans(1,0));
   }
   kai_loc_sub += kai_loc_old_;
 
@@ -900,12 +900,12 @@ void CLaserOdometry2D::PoseUpdate()
     kai_loc_(2) = 0.f;
   else
   {
-    kai_loc_(2) = fps*std::acos(acu_trans(0,0))*rf2o::sign(acu_trans(1,0));
+    kai_loc_(2) = fps*std::acos(acu_trans(0,0))*sign(acu_trans(1,0));
   }
 
   //cout << endl << "Arc cos (incr tita): " << kai_loc_(2);
 
-  float phi = rf2o::getYaw(laser_pose_.rotation());
+  float phi = getYaw(laser_pose_.rotation());
 
   kai_abs_(0) = kai_loc_(0)*std::cos(phi) - kai_loc_(1)*std::sin(phi);
   kai_abs_(1) = kai_loc_(0)*std::sin(phi) + kai_loc_(1)*std::cos(phi);
@@ -919,7 +919,7 @@ void CLaserOdometry2D::PoseUpdate()
   //  Eigen::Matrix3f aux_acu = acu_trans;
   Pose3d pose_aux_2D = Pose3d::Identity();
 
-  pose_aux_2D = rf2o::matrixYaw(double(kai_loc_(2)/fps));
+  pose_aux_2D = matrixYaw(double(kai_loc_(2)/fps));
   pose_aux_2D.translation()(0) = acu_trans(0,2);
   pose_aux_2D.translation()(1) = acu_trans(1,2);
 
@@ -929,35 +929,35 @@ void CLaserOdometry2D::PoseUpdate()
 
   //				Compute kai_loc_old
   //-------------------------------------------------------
-  phi = rf2o::getYaw(laser_pose_.rotation());
+  phi = getYaw(laser_pose_.rotation());
   kai_loc_old_(0) =  kai_abs_(0)*std::cos(phi) + kai_abs_(1)*std::sin(phi);
   kai_loc_old_(1) = -kai_abs_(0)*std::sin(phi) + kai_abs_(1)*std::cos(phi);
   kai_loc_old_(2) =  kai_abs_(2);
 
-  ROS_INFO_COND(verbose, "[rf2o] LASERodom = [%f %f %f]",
-                laser_pose_.translation()(0),
-                laser_pose_.translation()(1),
-                rf2o::getYaw(laser_pose_.rotation()));
+  if (verbose) std::cout << "[rf2o] LASERodom = [" 
+                << laser_pose_.translation()(0) << ", "
+                << laser_pose_.translation()(1) << ", "
+                << getYaw(laser_pose_.rotation()) << "]" << std::endl;
 
   //Compose Transformations
   robot_pose_ = laser_pose_ * laser_pose_on_robot_inv_;
 
-  ROS_INFO_COND(verbose, "BASEodom = [%f %f %f]",
-                robot_pose_.translation()(0),
-                robot_pose_.translation()(1),
-                rf2o::getYaw(robot_pose_.rotation()));
+  if (verbose) std::cout << "BASEodom = ["
+                << robot_pose_.translation()(0) << ", "
+                << robot_pose_.translation()(1) << ", "
+                << getYaw(robot_pose_.rotation()) << "]" << std::endl;
 
   // Estimate linear/angular speeds (mandatory for base_local_planner)
   // last_scan -> the last scan received
   // last_odom_time -> The time of the previous scan lasser used to estimate the pose
   //-------------------------------------------------------------------------------------
-  double time_inc_sec = (current_scan_time - last_odom_time).toSec();
+  double time_inc_sec = (current_scan_time - last_odom_time).seconds();
   last_odom_time = current_scan_time;
   lin_speed = acu_trans(0,2) / time_inc_sec;
   //double lin_speed = sqrt( mrpt::math::square(robot_oldpose.x()-robot_pose.x()) + mrpt::math::square(robot_oldpose.y()-robot_pose.y()) )/time_inc_sec;
 
-  double ang_inc = rf2o::getYaw(robot_pose_.rotation()) -
-      rf2o::getYaw(robot_oldpose_.rotation());
+  double ang_inc = getYaw(robot_pose_.rotation()) -
+      getYaw(robot_oldpose_.rotation());
 
   if (ang_inc > 3.14159)
     ang_inc -= 2*3.14159;
@@ -983,4 +983,4 @@ void CLaserOdometry2D::PoseUpdate()
     */
 }
 
-} /* namespace rf2o */
+// } /* namespace rf2o */

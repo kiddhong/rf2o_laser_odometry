@@ -1,5 +1,6 @@
 <?xml version="1.0"?>
-<package>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
 
   <name>rf2o_laser_odometry</name>
   <version>1.0.0</version>
@@ -13,25 +14,33 @@
   <maintainer email="jgmonroy@uma.es">Javier G. Monroy</maintainer>
   <author email="marianojt@uma.es"> Mariano Jaimez</author>
   <author email="jgmonroy@uma.es"> Javier G. Monroy</author>
+  <author email="normandy.jhlee@gmail.com"> Harry Lee</author>
   <license>GPL v3</license> 
 
-  <buildtool_depend>catkin</buildtool_depend>
+  <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <build_depend>nav_msgs</build_depend>
-  <build_depend>roscpp</build_depend>
-  <build_depend>sensor_msgs</build_depend>
-  <build_depend>std_msgs</build_depend>
-  <build_depend>tf</build_depend>
-  <build_depend>cmake_modules</build_depend>   <!-- A common repository for CMake Modules which are not distributed with CMake but are commonly used by ROS packages. -->
-                                               <!-- https://github.com/ros/cmake_modules/blob/0.3-devel/README.md -->
-  <build_depend>eigen</build_depend>
+  <depend>rclcpp</depend>
+  <depend>nav_msgs</depend>
+  <depend>roscpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2</depend>
+  <depend>tf2_msgs</depend>
+  <depend>tf2_geometry_msgs</depend>
 
-  <run_depend>nav_msgs</run_depend>
-  <run_depend>roscpp</run_depend>
-  <run_depend>sensor_msgs</run_depend>
-  <run_depend>std_msgs</run_depend>
-  <run_depend>tf</run_depend>
-  <run_depend>cmake_modules</run_depend>   <!-- For aditional dependencies such as Eigen -->
-  <run_depend>eigen</run_depend>
+  <depend>launch_ros</depend>
+  <depend>launch_testing</depend>
+  <depend>cmake_modules</depend>   <!-- A common repository for CMake Modules which are not distributed with CMake but are commonly used by ROS packages. -->
+                                   <!-- https://github.com/ros/cmake_modules/blob/0.3-devel/README.md -->
+  <depend>eigen</depend>
 
+  <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>launch</test_depend>
+  <test_depend>launch_testing</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
 </package>
