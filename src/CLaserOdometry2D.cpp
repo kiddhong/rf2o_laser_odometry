@@ -17,45 +17,11 @@
 
 #include "rf2o_laser_odometry/CLaserOdometry2D.h"
 
-// namespace rf2o {
-
-// --------------------------------------------
-// CLaserOdometry2D
-//---------------------------------------------
-
-// CLaserOdometry2D() :
-//   verbose(false),
-//   module_initialized(false),
-//   first_laser_scan(true),
-//   last_increment_(Pose3d::Identity()),
-//   laser_pose_on_robot_(Pose3d::Identity()),
-//   laser_pose_on_robot_inv_(Pose3d::Identity()),
-//   laser_pose_(Pose3d::Identity()),
-//   laser_oldpose_(Pose3d::Identity()),
-//   robot_pose_(Pose3d::Identity()),
-//   robot_oldpose_(Pose3d::Identity())
-// {
-//   //
-// }
-
-
 void CLaserOdometry2D::setLaserPose(const Pose3d& laser_pose)
 {
-  // last_increment_ = Pose3d::Identity();
-  // laser_pose_on_robot_ = Pose3d::Identity();
-  // laser_pose_on_robot_inv_ = Pose3d::Identity();
-  // laser_pose_ = Pose3d::Identity();
-  // laser_oldpose_ = Pose3d::Identity();
-  // robot_pose_ = Pose3d::Identity();
-  // robot_oldpose_ = Pose3d::Identity();
-
   //Set laser pose on the robot
-  // std::cout << "call 4" << std::endl;
-  // std::cout << laser_pose.matrix() << std::endl;
   laser_pose_on_robot_     = laser_pose;
-  // std::cout << "call 5" << std::endl;
   laser_pose_on_robot_inv_ = laser_pose_on_robot_.inverse();
-  // std::cout << "call 6" << std::endl;
 }
 
 bool CLaserOdometry2D::is_initialized()
